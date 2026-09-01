@@ -1,0 +1,27 @@
+{
+  "name": "globchat",
+  "version": "1.0.0",
+  "description": "A polished, temporary global live-chat room built with:",
+  "main": "script.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlobChat/GlobChat.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/GlobChat/GlobChat/issues"
+  },
+  "homepage": "https://github.com/GlobChat/GlobChat#readme",
+  "dependencies": {
+    "puppeteer-core": "^25.8.0"
+  }
+}

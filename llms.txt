@@ -1,0 +1,15 @@
+# globchat
+
+> A temporary, real-time chat web app. There are no accounts, no sign-up, and no message history — everything lives only in the browser tab and disappears when it closes.
+
+globchat has two modes:
+
+- **Global Chat** — one public room shared by everyone currently on the site, in plain text, real-time, with no persistence on the server.
+- **Private Chat** — code-gated rooms (4-character codes) that are end-to-end encrypted: message text and file attachments are both encrypted in the browser (AES-GCM, key derived from the room code via PBKDF2) before anything leaves the device, so the server only ever sees ciphertext.
+
+Files up to 50 MB can be shared in either mode. There is no database of users or messages; state exists only in memory/sessionStorage for the duration of the visit.
+
+## Pages
+
+- [Home / chat app](https://globchat.pages.dev/): The chat application itself — enter a display name to join the global room, or create/join a private encrypted room by code.
+- [Terms & Conditions](https://globchat.pages.dev/terms.html): Usage terms, acceptable use, content and moderation policy, and privacy notes.

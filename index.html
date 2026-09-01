@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-QMPERSRBDN"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-QMPERSRBDN');
+</script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0c" />
+  <meta name="description" content="globchat — a temporary, real-time public chat room." />
+  <title>globchat — live &amp; temporary</title>
+  <link rel="icon" type="image/png" href="favicon-32x32.png" sizes="32x32" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" type="image/png" href="favicon-16x16.png" sizes="16x16" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" type="image/png" href="favicon-32x32-light.png" sizes="32x32" media="(prefers-color-scheme: light)" />
+  <link rel="icon" type="image/png" href="favicon-16x16-light.png" sizes="16x16" media="(prefers-color-scheme: light)" />
+  <link rel="icon" href="favicon.ico" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="manifest" href="site.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Non-blocking font load: on filtered networks (FortiGate etc.) a hung
+       font request must never delay first render. Falls back to system
+       fonts until/unless the stylesheet arrives. -->
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+    rel="stylesheet"
+    media="print"
+    onload="this.media='all'"
+  />
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  </noscript>
+  <link rel="stylesheet" href="style.css?v=9" />
+</head>
+<body>
+  <main class="app-shell">
+    <!-- Welcome screen -->
+    <section id="welcome-screen" class="screen">
+      <div class="glass-card welcome-card">
+        <img class="brand-mark" src="apple-touch-icon.png" alt="" aria-hidden="true" />
+        <h1>globchat</h1>
+        <span class="eyebrow">ephemeral · one room · no history</span>
+        <p class="subtitle">Everyone shares a single global room, live across the world. Refresh the page and the whole conversation is gone.</p>
+
+        <form id="name-form" class="name-form" novalidate>
+          <div class="input-wrap">
+            <input
+              id="name-input"
+              name="name"
+              type="text"
+              autocomplete="nickname"
+              maxlength="32"
+              placeholder="Pick a name"
+              aria-describedby="name-error"
+              aria-label="Display name"
+              required
+            />
+          </div>
+          <p id="name-error" class="form-error" role="alert"></p>
+          <button id="start-button" class="primary-button" type="submit">Enter the incognito chat</button>
+          <p class="terms-consent">By going to chat you accept our <a href="terms.html">Terms &amp; Conditions</a>.</p>
+        </form>
+      </div>
+    </section>
+
+    <!-- Chat screen -->
+    <section id="chat-screen" class="chat-screen hidden" aria-label="Global chat">
+      <header class="chat-header glass-card">
+        <button id="home-logo" class="header-brand header-brand-button" type="button" title="Back to home" aria-label="Back to home">
+          <img class="mini-logo" src="apple-touch-icon.png" alt="" aria-hidden="true" />
+          <span class="header-brand-text">
+            <h2>globchat</h2>
+            <p>ephemeral room</p>
+          </span>
+        </button>
+
+        <div class="header-actions">
+          <div class="header-user" aria-label="Your display name">
+            <span class="avatar" id="user-avatar">M</span>
+            <span id="current-user-name">You</span>
+          </div>
+          <div class="connection-pill" id="connection-pill" data-state="connecting" role="status" aria-live="polite">
+            <span class="status-dot"></span>
+            <span id="connection-text">Connecting...</span>
+          </div>
+          <div class="online-pill" title="Approximate currently connected clients">
+            <span id="online-count">—</span>
+            <span>online</span>
+          </div>
+          <button id="leave-button" class="icon-button" type="button" title="Leave chat" aria-label="Leave chat">×</button>
+        </div>
+      </header>
+
+      <nav class="chat-mode-switch" aria-label="Chat mode">
+        <button class="chat-mode-option is-active" id="global-chat-tab" type="button" role="tab" aria-selected="true" aria-controls="global-chat-panel">
+          <span aria-hidden="true">🌍</span>
+          <span>Global Chat</span>
+        </button>
+        <button class="chat-mode-option" id="private-chat-tab" type="button" role="tab" aria-selected="false" aria-controls="private-chat-panel">
+          <span aria-hidden="true">🔒</span>
+          <span>Private Chat</span>
+          <span id="private-unread-badge" class="private-unread-badge hidden" aria-label="Unread private messages">0</span>
+        </button>
+      </nav>
+
+      <div class="chat-layout">
+        <div id="global-chat-panel" class="chat-main chat-panel" role="tabpanel" aria-labelledby="global-chat-tab">
+          <div id="message-list" class="message-list" aria-live="polite" aria-label="Messages">
+            <div id="empty-state" class="empty-state">
+              <p>nothing here yet — start talking</p>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <div id="attachment-preview" class="attachment-preview hidden">
+              <span id="attachment-name" class="attachment-name"></span>
+              <span id="attachment-size" class="attachment-size"></span>
+              <button id="remove-attachment" type="button" class="remove-attachment" aria-label="Remove attachment">×</button>
+            </div>
+            <form id="message-form" class="message-form" novalidate>
+              <input id="file-input" type="file" class="visually-hidden" tabindex="-1" />
+              <button id="attach-button" class="icon-button attach-button" type="button" title="Attach a file" aria-label="Attach a file">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>
+              </button>
+              <textarea
+                id="message-input"
+                rows="1"
+                placeholder="Message the room…"
+                aria-label="Type your message"
+              ></textarea>
+              <button id="send-button" class="send-button" type="submit" title="Send message" aria-label="Send message">↑</button>
+            </form>
+            <div class="composer-footer">
+              <span><kbd>Enter</kbd> to send · <kbd>Shift + Enter</kbd> for a new line</span>
+              <span class="composer-hint">Files up to 50 MB</span>
+            </div>
+          </div>
+        </div>
+
+        <section id="private-chat-panel" class="private-chat-panel chat-panel hidden" role="tabpanel" aria-labelledby="private-chat-tab" aria-hidden="true">
+          <div class="private-layout" id="private-layout">
+            <aside class="private-sidebar" id="private-sidebar" aria-label="Private chat rooms">
+              <div class="private-sidebar-section">
+                <div class="private-sidebar-head">
+                  <h3 class="private-sidebar-title">Conversations</h3>
+                  <button id="new-room-button" class="new-room-button" type="button" title="Create or join a room">＋ New</button>
+                </div>
+                <ul id="conversation-list" class="private-item-list"></ul>
+                <p id="conversation-list-empty" class="private-list-empty">no rooms yet — create one or join with a code</p>
+              </div>
+            </aside>
+
+            <section id="private-thread" class="private-thread" aria-label="Private conversation">
+              <div id="private-thread-empty" class="private-thread-empty">
+                <button id="private-start-back" class="icon-button private-start-back" type="button" title="Back to conversations" aria-label="Back to conversations">←</button>
+                <div class="private-thread-empty-icon" aria-hidden="true">🔒</div>
+                <h1>Private chats</h1>
+                <p>Create a room and share its 4-digit code, or join a room you were invited to.</p>
+
+                <input
+                  id="room-name-input"
+                  name="roomname"
+                  type="text"
+                  maxlength="32"
+                  autocomplete="off"
+                  placeholder="Room name (optional)"
+                  aria-label="Room name (optional)"
+                  class="room-name-input"
+                />
+                <button id="create-room-button" class="primary-button private-start-action" type="button">Create a chat</button>
+
+                <div class="private-start-divider" aria-hidden="true"><span>or</span></div>
+
+                <form id="join-room-form" class="join-room-form" novalidate>
+                  <input
+                    id="room-code-input"
+                    name="code"
+                    type="text"
+                    autocomplete="off"
+                    autocapitalize="characters"
+                    autocorrect="off"
+                    spellcheck="false"
+                    maxlength="4"
+                    placeholder="XXXX"
+                    aria-label="4-character room code"
+                    required
+                  />
+                  <button id="join-room-button" class="join-room-submit" type="submit">Join</button>
+                </form>
+                <p id="join-room-error" class="form-error" role="alert"></p>
+              </div>
+
+              <div id="private-thread-active" class="private-thread-active hidden">
+                <header class="private-thread-header">
+                  <button id="private-back-button" class="icon-button private-back-button" type="button" title="Back to list" aria-label="Back to conversations">←</button>
+                  <span class="avatar private-peer-avatar" id="room-avatar" aria-hidden="true">#</span>
+                  <div class="private-peer-meta">
+                    <span id="room-title">Room ····</span>
+                    <span class="private-peer-status" id="room-status" data-state="connecting">
+                      <span class="status-dot"></span>
+                      <span id="room-status-text">connecting…</span>
+                    </span>
+                  </div>
+                  <button id="room-members-button" class="room-members-chip" type="button" title="Show members" aria-label="Show room members">
+                    <span aria-hidden="true">👥</span>
+                    <span id="room-members-count">1</span>
+                  </button>
+                  <div id="room-members-panel" class="room-members-panel hidden" aria-label="Members in this room">
+                    <ul id="room-members-list"></ul>
+                  </div>
+                  <button id="copy-code-button" class="room-code-chip" type="button" title="Copy room code" aria-label="Copy room code">
+                    <span aria-hidden="true">⧉</span>
+                    <span id="room-code-label">····</span>
+                  </button>
+                  <button id="private-close-button" class="icon-button" type="button" title="Leave this room" aria-label="Leave this room">×</button>
+                </header>
+
+                <div id="private-message-list" class="message-list private-message-list" aria-live="polite" aria-label="Private messages">
+                  <div id="private-empty-state" class="empty-state">
+                    <p>this room is end-to-end encrypted · say hi</p>
+                  </div>
+                </div>
+
+                <div id="private-attachment-preview" class="attachment-preview hidden">
+                  <span id="private-attachment-name" class="attachment-name"></span>
+                  <span id="private-attachment-size" class="attachment-size"></span>
+                  <button id="private-remove-attachment" type="button" class="remove-attachment" aria-label="Remove attachment">×</button>
+                </div>
+                <form id="private-message-form" class="private-message-form" novalidate>
+                  <input id="private-file-input" type="file" class="visually-hidden" tabindex="-1" />
+                  <button id="private-attach-button" class="icon-button attach-button" type="button" title="Attach a file" aria-label="Attach a file">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>
+                  </button>
+                  <textarea
+                    id="private-message-input"
+                    rows="1"
+                    placeholder="Write a message…"
+                    aria-label="Type a room message"
+                  ></textarea>
+                  <button id="private-send-button" class="send-button" type="submit" title="Send message" aria-label="Send message">↑</button>
+                </form>
+                <div class="composer-footer private-composer-footer">
+                  <span><kbd>Enter</kbd> to send · <kbd>Shift + Enter</kbd> for a new line</span>
+                </div>
+                <p class="e2e-encrypted-label">
+                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                  End to end Encrypted
+                </p>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <div id="toast-container" class="toast-container" aria-live="assertive"></div>
+  </main>
+
+  <!-- Vendored locally: on filtered/filtered-DNS networks a CDN request can
+       hang or fail intermittently, which would block page parse entirely. -->
+  <script src="vendor/supabase.min.js?v=8"></script>
+  <script src="config.js?v=8"></script>
+  <script src="script.js?v=8"></script>
+</body>
+</html>
