@@ -115,6 +115,10 @@ let currentMode = "global";
 /* Soft-reload persistence state. */
 let sessionSaveTimer = null;
 let globalTranscript = []; // mirrors rendered global messages for persistence
+const messageRecords = new Map();
+const deletedForSelf = new Set();
+let editingMessageId = null;
+let messageContextMenu = null;
 
 /* ----------------------------- DOM ----------------------------- */
 
@@ -178,6 +182,8 @@ const privateMessageInput = document.getElementById("private-message-input");
 const privateSendButton = document.getElementById("private-send-button");
 const privateAttachButton = document.getElementById("private-attach-button");
 const privateFileInput = document.getElementById("private-file-input");
+const editingBanner = document.getElementById("editing-banner");
+const cancelEditButton = document.getElementById("cancel-edit-button");
 const privateAttachmentPreview = document.getElementById("private-attachment-preview");
 const privateAttachmentName = document.getElementById("private-attachment-name");
 const privateAttachmentSize = document.getElementById("private-attachment-size");
@@ -1217,22 +1223,211 @@ async function reportMessage(data, senderName, messageText, button) {
   }
 }
 
+function closeMessageContextMenu() {
+  if (messageContextMenu) messageContextMenu.remove();
+  messageContextMenu = null;
+}
+
+function sendMessageAction(action, data) {
+  if (!chatChannel || !isSubscribed || !data?.id) return;
+  chatChannel.send({ type: "broadcast", event: MESSAGE_EVENT, payload: {
+    action, id: data.id, targetClientId: data.clientId, actorClientId: clientId,
+    ...(action === "edit" ? { message: data.message, editedAt: data.editedAt } : {}),
+    ...(action === "reaction" ? { emoji: data.emoji, remove: data.remove } : {})
+  }}).catch((error) => console.error("Message action failed:", error));
+}
+
+function updateTranscriptRecord(data) {
+  const index = globalTranscript.findIndex((item) => item.id === data.id);
+  if (index >= 0) globalTranscript[index] = { ...globalTranscript[index], ...data };
+  scheduleSessionSave();
+}
+
+function renderReactionSummary(bubble, data) {
+  const reactions = data.reactions || {};
+  const entries = Object.entries(reactions).filter(([, value]) => value && value.count > 0);
+  if (!entries.length) return;
+  const wrap = document.createElement("div"); wrap.className = "message-reactions";
+  entries.forEach(([emoji, value]) => {
+    const pill = document.createElement("button"); pill.type = "button"; pill.className = "reaction-pill";
+    if (value.users?.includes(clientId)) pill.classList.add("is-own");
+    pill.textContent = `${emoji} ${value.count}`; pill.title = "Toggle reaction";
+    pill.addEventListener("click", () => toggleReaction(data, emoji)); wrap.appendChild(pill);
+  });
+  bubble.appendChild(wrap);
+}
+
+function toggleReaction(data, emoji) {
+  const reactions = data.reactions || (data.reactions = {});
+  const entry = reactions[emoji] || { count: 0, users: [] };
+  const users = Array.isArray(entry.users) ? entry.users : [];
+  const index = users.indexOf(clientId); const remove = index >= 0;
+  if (remove) users.splice(index, 1); else users.push(clientId);
+  entry.users = users; entry.count = users.length; reactions[emoji] = entry;
+  updateTranscriptRecord(data);
+  document.querySelector(`[data-message-id="${CSS.escape(String(data.id))}"]`)?.replaceWith(buildGlobalMessageRow(data));
+  sendMessageAction("reaction", { ...data, emoji, remove });
+}
+
+function showReactionPicker(data, x, y) {
+  closeMessageContextMenu();
+  const picker = createQuickReactionPicker(data, x, y);
+  document.body.appendChild(picker); messageContextMenu = picker;
+  picker.style.left = `${Math.max(8, Math.min(x, innerWidth - picker.offsetWidth - 8))}px`;
+  picker.style.top = `${Math.max(8, Math.min(y, innerHeight - picker.offsetHeight - 8))}px`;
+}
+
+function createQuickReactionPicker(data, x, y) {
+  const picker = document.createElement("div"); picker.className = "reaction-picker-menu quick-reaction-picker";
+  ["👍", "❤️", "😂", "😮", "😢", "🙏"].forEach((emoji) => {
+    const button = document.createElement("button"); button.className = "reaction-picker-item";
+    button.type = "button"; button.textContent = emoji; button.title = emoji;
+    button.addEventListener("click", () => { closeMessageContextMenu(); toggleReaction(data, emoji); }); picker.appendChild(button);
+  });
+  return picker;
+}
+
+const reactionCategories = {
+  "Smileys & People": "😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🫡 🤭 🤫 🤥 😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 🤐 🤑 🤠 😈 👿 👹 👺 🤡 💩 👻 💀 ☠️ 👽 👾 🤖 🎃 😺 😸 😹 😻 😼 😽 🙀 😿 😾 👋 🤚 🖐️ ✋ 🖖 👌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🙏 💪 🧠 👀 👁️ 👄 💋 💅",
+  Animals: "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🙈 🙉 🙊 🐒 🐔 🐧 🐦 🐤 🦆 🦅 🦉 🐺 🐗 🐴 🦄 🐝 🪲 🦋 🐌 🐞 🐜 🕷️ 🦂 🐢 🐍 🦎 🦖 🐙 🦀 🐠 🐟 🐡 🐬 🐳 🦈 🐊 🐘 🦏 🦒 🦓 🦍 🐪 🐫 🐄 🐎 🐖 🐑 🐐 🦌 🐕 🐈",
+  Food: "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🍆 🥑 🥦 🥬 🥒 🌶️ 🌽 🥕 🧄 🧅 🥔 🍞 🥐 🥨 🧀 🥚 🍳 🧈 🥞 🧇 🥓 🥩 🍗 🍔 🍟 🍕 🌭 🌮 🌯 🥗 🍿 🍣 🍤 🍜 🍝 🍦 🍩 🍪 🎂 🍰 🍫 🍬 🍭 ☕ 🍵 🧃 🥤 🍺 🍻 🍷 🍸 🍹",
+  Activities: "⚽ 🏀 🏈 ⚾ 🥎 🎾 🏐 🏉 🥏 🎱 🪀 🪁 🏓 🏸 🥊 🥋 🛹 🛷 ⛸️ 🎿 🏆 🥇 🥈 🥉 🏅 🎖️ 🎮 🕹️ 🎲 ♟️ 🎯 🎳 🎭 🎨 🎼 🎹 🥁 🎷 🎺 🎸 🎻 🎬",
+  Travel: "🚗 🚕 🚙 🚌 🚎 🏎️ 🚓 🚑 🚒 🚐 🛻 🚚 🚛 🚜 🛵 🏍️ 🚲 ✈️ 🚀 🛸 🚁 🛶 ⛵ 🚤 🛳️ 🚢 ⚓ 🗺️ 🗽 🗼 🏰 🏯 🏝️ 🏖️ 🏕️ ⛺ 🏠 🏢 🌋 🗿",
+  Objects: "⌚ 📱 💻 ⌨️ 🖨️ 🖱️ 💡 🔦 📷 📺 🎥 📞 🔋 🔌 💰 💎 🔑 🔒 🔓 🔨 🪓 🛠️ ⚔️ 🔫 🧨 🧸 🎁 🎈 ✉️ 📝 📌 📍 📎 📚 🔍 🛒 🧳 ☂️",
+  Symbols: "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 ✨ ⭐ 🌟 💫 🔥 💥 💯 ✅ ❌ ❗ ❓ ⚠️ 🚫 ♻️ ✔️ ☑️ ➕ ➖ ✖️ 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪",
+  Flags: "🏁 🚩 🎌 🏳️ 🏴 🏳️‍🌈 🏴‍☠️ 🇺🇸 🇬🇧 🇮🇳 🇨🇦 🇦🇺 🇯🇵 🇰🇷 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇧🇷 🇲🇽 🇿🇦 🇸🇬 🇦🇪 🇳🇿 🇵🇭 🇹🇭 🇻🇳 🇨🇳"
+};
+
+function showFullReactionPicker(data, x, y) {
+  closeMessageContextMenu();
+  const picker = document.createElement("div"); picker.className = "full-reaction-picker message-context-menu";
+  const search = document.createElement("input"); search.className = "reaction-search"; search.type = "search"; search.placeholder = "Search reaction"; search.setAttribute("aria-label", "Search reaction"); picker.appendChild(search);
+  const tabs = document.createElement("div"); tabs.className = "reaction-category-tabs"; picker.appendChild(tabs);
+  const grid = document.createElement("div"); grid.className = "reaction-grid"; picker.appendChild(grid);
+  let active = Object.keys(reactionCategories)[0];
+  const render = () => {
+    grid.textContent = ""; const query = search.value.trim().toLowerCase();
+    const emojis = reactionCategories[active].split(" ").filter((emoji) => !query || emoji.includes(query));
+    emojis.forEach((emoji) => { const button = document.createElement("button"); button.type = "button"; button.className = "reaction-grid-item"; button.textContent = emoji; button.title = emoji; button.addEventListener("click", () => { closeMessageContextMenu(); toggleReaction(data, emoji); }); grid.appendChild(button); });
+  };
+  Object.keys(reactionCategories).forEach((category) => { const tab = document.createElement("button"); tab.type = "button"; tab.className = "reaction-category-tab"; tab.textContent = category.split(" ")[0]; tab.title = category; tab.addEventListener("click", () => { active = category; tabs.querySelectorAll("button").forEach((item) => item.classList.remove("is-active")); tab.classList.add("is-active"); render(); }); tabs.appendChild(tab); });
+  tabs.firstChild.classList.add("is-active"); search.addEventListener("input", render); render();
+  document.body.appendChild(picker); messageContextMenu = picker; search.focus();
+  picker.style.left = `${Math.max(8, Math.min(x - 10, innerWidth - 390))}px`; picker.style.top = `${Math.max(8, Math.min(y, innerHeight - 430))}px`;
+}
+
+function beginEdit(data) {
+  if (data.clientId !== clientId || data.deleted) return;
+  editingMessageId = data.id; messageInput.value = data.message || "";
+  editingBanner.classList.remove("hidden"); autoResizeTextarea(); messageInput.focus();
+}
+
+function cancelEdit() {
+  editingMessageId = null; editingBanner.classList.add("hidden"); messageInput.value = "";
+  autoResizeTextarea();
+}
+
+function deleteForSelf(data) {
+  deletedForSelf.add(data.id);
+  document.querySelector(`[data-message-id="${CSS.escape(String(data.id))}"]`)?.remove();
+  globalTranscript = globalTranscript.filter((item) => item.id !== data.id);
+  if (!messageList.querySelector(".message-row:not(#empty-state)")) emptyState.classList.remove("hidden");
+  scheduleSessionSave();
+}
+
+function applyMessageAction(action) {
+  const data = messageRecords.get(action.id);
+  if (!data || deletedForSelf.has(action.id)) return;
+  if (action.action === "edit") {
+    if (action.actorClientId !== data.clientId || typeof action.message !== "string") return;
+    data.message = cleanMessage(action.message); data.edited = true; data.editedAt = action.editedAt || new Date().toISOString();
+  } else if (action.action === "delete") {
+    if (action.actorClientId !== data.clientId) return;
+    data.deleted = true; data.message = ""; data.fileUrl = undefined;
+  } else if (action.action === "reaction") {
+    if (!action.emoji || action.emoji.length > 8) return;
+    const reactions = data.reactions || (data.reactions = {});
+    const entry = reactions[action.emoji] || { count: 0, users: [] };
+    const users = Array.isArray(entry.users) ? entry.users : [];
+    const index = users.indexOf(action.actorClientId);
+    if (action.remove && index >= 0) users.splice(index, 1);
+    else if (!action.remove && index < 0) users.push(action.actorClientId);
+    entry.users = users; entry.count = users.length; reactions[action.emoji] = entry;
+  } else return;
+  updateTranscriptRecord(data);
+  document.querySelector(`[data-message-id="${CSS.escape(String(data.id))}"]`)?.replaceWith(buildGlobalMessageRow(data));
+}
+
+function buildGlobalMessageRow(data) {
+  const name = cleanText(data.name, MAX_NAME_LENGTH) || "anonymous";
+  const row = document.createElement("article"); row.className = "message-row"; row.dataset.messageId = String(data.id);
+  const own = data.clientId === clientId; if (own) row.classList.add("is-own-message");
+  row.addEventListener("contextmenu", (event) => openMessageContextMenu(event, data));
+  const avatar = document.createElement("div"); avatar.className = "message-avatar"; avatar.textContent = getInitial(name);
+  const bubble = document.createElement("div"); bubble.className = "message-bubble";
+  const nameRow = document.createElement("div"); nameRow.className = "message-name-row";
+  const nameEl = document.createElement("div"); nameEl.className = "message-name"; nameEl.textContent = name; nameRow.appendChild(nameEl);
+  if (!own) {
+    const report = document.createElement("button"); report.type = "button"; report.className = "message-report-button";
+    report.title = "Report this message"; report.setAttribute("aria-label", `Report message from ${name}`);
+    report.textContent = "⚑"; report.addEventListener("click", () => reportMessage(data, name, data.message, report)); nameRow.appendChild(report);
+  }
+  if (data.edited) { const tag = document.createElement("span"); tag.className = "message-edited-tag"; tag.textContent = "Edited"; nameRow.appendChild(tag); }
+  bubble.appendChild(nameRow);
+  if (data.deleted) { const deleted = document.createElement("div"); deleted.className = "message-text message-deleted-text"; deleted.textContent = "Message deleted for everyone"; bubble.appendChild(deleted); }
+  else if (data.message) { const text = document.createElement("div"); text.className = "message-text"; text.textContent = data.message; bubble.appendChild(text); }
+  if (!data.deleted && isRenderableAttachment(data)) bubble.appendChild(buildAttachmentElement(data));
+  const time = document.createElement("time"); time.className = "message-time"; const date = new Date(data.sentAt);
+  time.textContent = Number.isNaN(date.getTime()) ? "now" : date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); bubble.appendChild(time);
+  const contentStack = document.createElement("div"); contentStack.className = "message-content-stack";
+  contentStack.appendChild(bubble); renderReactionSummary(contentStack, data);
+  row.append(avatar, contentStack); return row;
+}
+
+function openMessageContextMenu(event, data) {
+  event.preventDefault(); closeMessageContextMenu();
+  const menu = document.createElement("div"); menu.className = "message-context-menu"; menu.setAttribute("role", "menu");
+  const add = (label, handler, danger = false) => {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+    if (danger) button.classList.add("is-danger"); button.addEventListener("click", () => { closeMessageContextMenu(); handler(); }); menu.appendChild(button);
+  };
+  if (data.clientId === clientId && !data.deleted) {
+    add("Edit message", () => beginEdit(data)); add("Delete for everyone", () => { sendMessageAction("delete", data); applyMessageAction({ action: "delete", id: data.id, actorClientId: clientId }); }, true);
+  }
+  add("Delete for yourself", () => deleteForSelf(data), true);
+  if (data.clientId !== clientId) add("Report message", () => document.querySelector(`[data-message-id="${CSS.escape(String(data.id))}"] .message-report-button`)?.click());
+  const shell = document.createElement("div"); shell.className = "message-actions-popover";
+  const quick = createQuickReactionPicker(data, event.clientX, event.clientY);
+  shell.append(quick, menu); document.body.appendChild(shell); messageContextMenu = shell;
+  const left = Math.max(8, Math.min(event.clientX, innerWidth - Math.max(menu.offsetWidth, quick.offsetWidth) - 8));
+  const top = Math.max(58, Math.min(event.clientY, innerHeight - menu.offsetHeight - 8));
+  shell.style.left = `${left}px`; shell.style.top = `${top}px`;
+}
+
 function renderMessage(payload) {
   const data = payload?.payload ?? payload;
 
   if (!data || typeof data !== "object") return;
+
+  if (data.action) { applyMessageAction(data); return; }
+  if (deletedForSelf.has(data.id) || messageRecords.has(data.id)) return;
 
   const name = cleanText(data.name, MAX_NAME_LENGTH);
   const message = cleanMessage(data.message);
   const hasFile = isRenderableAttachment(data);
   const isOwnMessage = data.clientId === clientId;
 
-  if (!name || (!message && !hasFile) || !rememberMessage(data.id)) return;
+  if (!name || (!message && !hasFile && !data.deleted) || !rememberMessage(data.id)) return;
+
+  data.name = name; data.message = message; data.reactions = data.reactions || {};
+  messageRecords.set(data.id, data);
 
   emptyState.classList.add("hidden");
 
   const row = document.createElement("article");
   row.className = "message-row";
+  row.dataset.messageId = String(data.id);
+  row.addEventListener("contextmenu", (event) => openMessageContextMenu(event, data));
   if (isOwnMessage) row.classList.add("is-own-message");
 
   const avatar = document.createElement("div");
@@ -1271,6 +1466,16 @@ function renderMessage(payload) {
     bubble.appendChild(messageEl);
   }
 
+  if (data.edited) {
+    const editedEl = document.createElement("span"); editedEl.className = "message-edited-tag";
+    editedEl.textContent = "Edited"; nameRow.appendChild(editedEl);
+  }
+
+  if (data.deleted) {
+    const deletedEl = document.createElement("div"); deletedEl.className = "message-text message-deleted-text";
+    deletedEl.textContent = "Message deleted for everyone"; bubble.appendChild(deletedEl);
+  }
+
   if (hasFile) {
     bubble.appendChild(buildAttachmentElement(data));
   }
@@ -1284,7 +1489,11 @@ function renderMessage(payload) {
     : sentAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
   bubble.appendChild(metaEl);
-  row.append(avatar, bubble);
+  const contentStack = document.createElement("div");
+  contentStack.className = "message-content-stack";
+  contentStack.appendChild(bubble);
+  renderReactionSummary(contentStack, data);
+  row.append(avatar, contentStack);
 
   // Smart scroll: only follow new messages if the reader is at the bottom.
   const wasNearBottom = isNearBottom(messageList);
@@ -1300,7 +1509,11 @@ function renderMessage(payload) {
     fileName: typeof data.fileName === "string" ? data.fileName : undefined,
     fileType: typeof data.fileType === "string" ? data.fileType : undefined,
     fileSize: typeof data.fileSize === "number" ? data.fileSize : undefined,
-    fileUrl: hasFile ? data.fileUrl : undefined
+    fileUrl: hasFile ? data.fileUrl : undefined,
+    edited: Boolean(data.edited),
+    editedAt: data.editedAt,
+    deleted: Boolean(data.deleted),
+    reactions: data.reactions || {}
   });
   if (globalTranscript.length > PERSISTED_GLOBAL_CAP) {
     globalTranscript.splice(0, globalTranscript.length - PERSISTED_GLOBAL_CAP);
@@ -1467,6 +1680,19 @@ async function sendMessage() {
 
   if (!validation.valid) {
     showToast(validation.message);
+    return;
+  }
+
+  if (editingMessageId) {
+    const data = messageRecords.get(editingMessageId);
+    if (data && data.clientId === clientId) {
+      data.message = validation.value;
+      data.edited = true;
+      data.editedAt = new Date().toISOString();
+      sendMessageAction("edit", data);
+      applyMessageAction({ action: "edit", id: data.id, actorClientId: clientId, message: data.message, editedAt: data.editedAt });
+    }
+    cancelEdit();
     return;
   }
 
@@ -2474,6 +2700,8 @@ async function startChat(name) {
   messageList.querySelectorAll(".message-row").forEach((el) => el.remove());
   recentMessageIds.clear();
   globalTranscript = [];
+  messageRecords.clear();
+  deletedForSelf.clear();
   reportedMessageIds.clear();
   emptyState.classList.remove("hidden");
 
@@ -2499,6 +2727,8 @@ async function leaveChat() {
   reconnectTimer = null;
   clearSavedSession();
   globalTranscript = [];
+  messageRecords.clear();
+  deletedForSelf.clear();
   reportedMessageIds.clear();
 
   await teardownPrivateRooms().catch(() => {});
@@ -2573,6 +2803,10 @@ messageInput.addEventListener("keydown", async (event) => {
 });
 
 leaveButton.addEventListener("click", leaveChat);
+cancelEditButton.addEventListener("click", cancelEdit);
+document.addEventListener("click", (event) => {
+  if (messageContextMenu && !messageContextMenu.contains(event.target)) closeMessageContextMenu();
+});
 
 globalChatTab.addEventListener("click", () => setChatMode("global"));
 privateChatTab.addEventListener("click", () => {

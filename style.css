@@ -1147,7 +1147,7 @@ h1 {
 }
 
 .message-bubble {
-  max-width: min(72%, 560px);
+  max-width: 100%;
   padding: 11px 15px;
   border: 1px solid var(--border-soft);
   border-radius: 18px 18px 18px 6px;
@@ -1224,6 +1224,17 @@ h1 {
   border: 1px solid transparent;
   border-radius: 18px 18px 6px 18px;
   background: var(--accent);
+}
+
+.message-content-stack {
+  display: flex;
+  min-width: 0;
+  max-width: min(72%, 680px);
+  flex-direction: column;
+}
+
+.message-row.is-own-message .message-content-stack {
+  align-items: flex-end;
 }
 
 .message-row.is-own-message .message-name {
@@ -1537,6 +1548,12 @@ h1 {
   font-style: italic;
 }
 
+/* Deleted copy sits on the lime outgoing bubble, so use the outgoing ink
+   color instead of the light muted color used on incoming bubbles. */
+.message-row.is-own-message .message-deleted-text {
+  color: rgba(10, 10, 12, 0.58) !important;
+}
+
 .message-reactions {
   display: flex;
   flex-wrap: wrap;
@@ -1606,6 +1623,77 @@ h1 {
   transform: translateY(-1px);
   outline: none;
 }
+
+.reaction-picker-menu .reaction-picker-item {
+  display: grid;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  text-align: center;
+}
+
+.reaction-picker-more {
+  border-left: 1px solid var(--border) !important;
+  border-radius: 0 10px 10px 0 !important;
+  color: var(--muted) !important;
+  font-size: 20px !important;
+}
+
+.full-reaction-picker {
+  width: min(380px, calc(100vw - 16px));
+  max-height: min(430px, calc(100vh - 16px));
+  overflow: hidden;
+  padding: 10px;
+}
+
+.reaction-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: 13px var(--font-display);
+}
+
+.reaction-search:focus { border-color: var(--accent); }
+.reaction-category-tabs { display: flex; gap: 4px; margin: 10px 0 6px; overflow-x: auto; }
+.reaction-category-tab { flex: 0 0 34px; padding: 7px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
+.reaction-category-tab.is-active { border-bottom-color: var(--accent); color: var(--text); }
+.reaction-grid { display: grid; grid-template-columns: repeat(8, 1fr); max-height: 330px; overflow-y: auto; }
+.reaction-grid-item { display: grid; place-items: center; min-height: 38px; border: 0; border-radius: 8px; background: transparent; font-size: 23px; cursor: pointer; }
+.reaction-grid-item:hover, .reaction-grid-item:focus-visible { background: rgba(255, 255, 255, 0.1); outline: none; }
+
+.message-context-menu {
+  position: fixed; z-index: 100; min-width: 190px; padding: 6px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(20, 20, 24, 0.98); box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+.message-actions-popover {
+  position: fixed;
+  z-index: 100;
+}
+.message-actions-popover > .message-context-menu {
+  position: static;
+}
+.message-actions-popover > .quick-reaction-picker {
+  top: -48px;
+  left: 0;
+  min-width: 0;
+  width: max-content;
+}
+.message-context-menu button {
+  display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text); font: 600 12px/1.2 var(--font-display);
+  text-align: left; cursor: pointer;
+}
+.message-context-menu button:hover,
+.message-context-menu button:focus-visible { background: rgba(255,255,255,.08); outline: none; }
+.message-context-menu button.is-danger { color: var(--danger); }
 
 .editing-banner {
   display: flex;
