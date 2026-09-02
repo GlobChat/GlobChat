@@ -118,6 +118,7 @@ let globalTranscript = []; // mirrors rendered global messages for persistence
 const messageRecords = new Map();
 const deletedForSelf = new Set();
 let editingMessageId = null;
+let editingPrivateMessage = null;
 let messageContextMenu = null;
 
 /* ----------------------------- DOM ----------------------------- */
@@ -547,7 +548,9 @@ async function restoreSession(saved) {
             messageText: cleanMessage(row.m),
             sentAtRaw: row.t,
             isOwnMessage: Boolean(row.own),
-            attachmentData: row.f && isRenderableAttachment(row.f) ? row.f : null
+            attachmentData: row.f && isRenderableAttachment(row.f) ? row.f : null,
+            id: row.id, clientId: row.c, name: cleanText(row.n, MAX_NAME_LENGTH) || "anonymous",
+            message: cleanMessage(row.m), sentAt: row.t, reactions: row.reactions || {}, edited: Boolean(row.edited), deleted: Boolean(row.deleted)
           });
         }
       }
@@ -1243,7 +1246,7 @@ function updateTranscriptRecord(data) {
   scheduleSessionSave();
 }
 
-function renderReactionSummary(bubble, data) {
+function renderReactionSummary(bubble, data, onReact = toggleReaction) {
   const reactions = data.reactions || {};
   const entries = Object.entries(reactions).filter(([, value]) => value && value.count > 0);
   if (!entries.length) return;
@@ -1252,7 +1255,7 @@ function renderReactionSummary(bubble, data) {
     const pill = document.createElement("button"); pill.type = "button"; pill.className = "reaction-pill";
     if (value.users?.includes(clientId)) pill.classList.add("is-own");
     pill.textContent = `${emoji} ${value.count}`; pill.title = "Toggle reaction";
-    pill.addEventListener("click", () => toggleReaction(data, emoji)); wrap.appendChild(pill);
+    pill.addEventListener("click", () => onReact(data, emoji)); wrap.appendChild(pill);
   });
   bubble.appendChild(wrap);
 }
@@ -1277,12 +1280,12 @@ function showReactionPicker(data, x, y) {
   picker.style.top = `${Math.max(8, Math.min(y, innerHeight - picker.offsetHeight - 8))}px`;
 }
 
-function createQuickReactionPicker(data, x, y) {
+function createQuickReactionPicker(data, x, y, onReact = toggleReaction) {
   const picker = document.createElement("div"); picker.className = "reaction-picker-menu quick-reaction-picker";
   ["👍", "❤️", "😂", "😮", "😢", "🙏"].forEach((emoji) => {
     const button = document.createElement("button"); button.className = "reaction-picker-item";
     button.type = "button"; button.textContent = emoji; button.title = emoji;
-    button.addEventListener("click", () => { closeMessageContextMenu(); toggleReaction(data, emoji); }); picker.appendChild(button);
+    button.addEventListener("click", () => { closeMessageContextMenu(); onReact(data, emoji); }); picker.appendChild(button);
   });
   return picker;
 }
@@ -1298,7 +1301,7 @@ const reactionCategories = {
   Flags: "🏁 🚩 🎌 🏳️ 🏴 🏳️‍🌈 🏴‍☠️ 🇺🇸 🇬🇧 🇮🇳 🇨🇦 🇦🇺 🇯🇵 🇰🇷 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇧🇷 🇲🇽 🇿🇦 🇸🇬 🇦🇪 🇳🇿 🇵🇭 🇹🇭 🇻🇳 🇨🇳"
 };
 
-function showFullReactionPicker(data, x, y) {
+function showFullReactionPicker(data, x, y, onReact = toggleReaction) {
   closeMessageContextMenu();
   const picker = document.createElement("div"); picker.className = "full-reaction-picker message-context-menu";
   const search = document.createElement("input"); search.className = "reaction-search"; search.type = "search"; search.placeholder = "Search reaction"; search.setAttribute("aria-label", "Search reaction"); picker.appendChild(search);
@@ -1308,7 +1311,7 @@ function showFullReactionPicker(data, x, y) {
   const render = () => {
     grid.textContent = ""; const query = search.value.trim().toLowerCase();
     const emojis = reactionCategories[active].split(" ").filter((emoji) => !query || emoji.includes(query));
-    emojis.forEach((emoji) => { const button = document.createElement("button"); button.type = "button"; button.className = "reaction-grid-item"; button.textContent = emoji; button.title = emoji; button.addEventListener("click", () => { closeMessageContextMenu(); toggleReaction(data, emoji); }); grid.appendChild(button); });
+    emojis.forEach((emoji) => { const button = document.createElement("button"); button.type = "button"; button.className = "reaction-grid-item"; button.textContent = emoji; button.title = emoji; button.addEventListener("click", () => { closeMessageContextMenu(); onReact(data, emoji); }); grid.appendChild(button); });
   };
   Object.keys(reactionCategories).forEach((category) => { const tab = document.createElement("button"); tab.type = "button"; tab.className = "reaction-category-tab"; tab.textContent = category.split(" ")[0]; tab.title = category; tab.addEventListener("click", () => { active = category; tabs.querySelectorAll("button").forEach((item) => item.classList.remove("is-active")); tab.classList.add("is-active"); render(); }); tabs.appendChild(tab); });
   tabs.firstChild.classList.add("is-active"); search.addEventListener("input", render); render();
@@ -1400,8 +1403,9 @@ function openMessageContextMenu(event, data) {
   const quick = createQuickReactionPicker(data, event.clientX, event.clientY);
   shell.append(quick, menu); document.body.appendChild(shell); messageContextMenu = shell;
   const left = Math.max(8, Math.min(event.clientX, innerWidth - Math.max(menu.offsetWidth, quick.offsetWidth) - 8));
-  const top = Math.max(58, Math.min(event.clientY, innerHeight - menu.offsetHeight - 8));
+  const top = Math.max(8, Math.min(event.clientY, innerHeight - menu.offsetHeight - quick.offsetHeight - 16));
   shell.style.left = `${left}px`; shell.style.top = `${top}px`;
+  quick.style.top = `${menu.offsetHeight + 8}px`;
 }
 
 function renderMessage(payload) {
@@ -2013,6 +2017,7 @@ function createRoomShell(code, saltB64) {
     lastActivityAt: "",
     preview: "",
     recentIds: new Set(),
+    messageRecords: new Map(),
     channel: null,
     // Set only while joinPrivateRoom is waiting to confirm the room is real
     // (see waitForRoomPresence) — called the moment presence shows someone
@@ -2281,7 +2286,8 @@ function openRoom(code) {
             rowData.sentAtRaw,
             rowData.isOwnMessage,
             rowData.attachmentData,
-            room
+            room,
+            rowData
           );
     privateMessageList.appendChild(node);
   });
@@ -2339,6 +2345,16 @@ async function sendPrivateMessage() {
     return;
   }
 
+  if (editingPrivateMessage?.room === room) {
+    const data = editingPrivateMessage.data;
+    if (data.clientId === clientId && !data.deleted) {
+      data.message = validation.value; data.edited = true;
+      await sendPrivateAction(room, data, { type: "edit", message: data.message });
+      applyPrivateMessageAction(room, data.id, { c: clientId, a: { type: "edit", id: data.id, message: data.message } });
+    }
+    editingPrivateMessage = null; privateMessageInput.value = ""; autoResizePrivateTextarea(); return;
+  }
+
   const now = Date.now();
   if (now - lastSentAt < MIN_SEND_INTERVAL_MS) {
     showToast("Slow down a little — you can send another message shortly.");
@@ -2354,11 +2370,14 @@ async function sendPrivateMessage() {
   try {
     if (!room.key) throw new Error("Room key not derived yet");
 
+    const messageId = `${clientId}-${now}`;
+
     const ct = await encryptPrivatePayload(room.key, {
       c: clientId,
       n: currentName,
       m: validation.value,
       t: new Date().toISOString(),
+      id: messageId,
       ...(attachment
         ? {
             f: {
@@ -2376,7 +2395,7 @@ async function sendPrivateMessage() {
       event: PRIVATE_MESSAGE_EVENT,
       payload: {
         v: 1,
-        id: `${clientId}-${now}`,
+        id: messageId,
         s: room.saltB64,
         ct
       }
@@ -2436,6 +2455,8 @@ async function handleRoomMessage(room, payload) {
     return; // Wrong key / tampered frame — dropped silently.
   }
 
+  if (plain?.a) { applyPrivateMessageAction(room, data.id, plain); return; }
+
   if (!plain || typeof plain !== "object" || typeof plain.m !== "string") return;
 
   const message = cleanMessage(plain.m);
@@ -2457,16 +2478,22 @@ async function handleRoomMessage(room, payload) {
   // Own-message detection uses the session ID inside the envelope, so two
   // people sharing a display name are never confused.
   const isOwnMessage = typeof plain.c === "string" && plain.c === clientId;
+  const messageData = {
+    id: data.id, clientId: plain.c, name: senderName, message, sentAt: plain.t,
+    attachmentData, reactions: plain.r || {}, edited: Boolean(plain.e), deleted: Boolean(plain.d)
+  };
+  room.messageRecords.set(data.id, messageData);
 
   // Mirror for soft-reload persistence (single choke point for both the
   // live-view and background-cache paths).
   room.transcript = room.transcript || [];
   room.transcript.push({
-    n: senderName,
+    n: senderName, c: plain.c, id: data.id,
     m: message,
     t: plain.t,
     own: isOwnMessage,
     f: attachmentData
+    , id: data.id, reactions: messageData.reactions, edited: messageData.edited, deleted: messageData.deleted
   });
   if (room.transcript.length > PERSISTED_ROOM_ROWS_CAP) {
     room.transcript.splice(0, room.transcript.length - PERSISTED_ROOM_ROWS_CAP);
@@ -2476,9 +2503,9 @@ async function handleRoomMessage(room, payload) {
   // the bubble would bleed into whichever thread is currently visible.
   const isViewing = currentMode === "private" && activeRoomCode === room.code;
   if (isViewing) {
-    appendRoomMessageRow(room, senderName, message, plain.t, isOwnMessage, attachmentData);
+    appendRoomMessageRow(room, senderName, message, plain.t, isOwnMessage, attachmentData, messageData);
   } else {
-    cacheRoomRow(room, senderName, message, plain.t, isOwnMessage, attachmentData);
+    cacheRoomRow(room, senderName, message, plain.t, isOwnMessage, attachmentData, messageData);
   }
 
   room.lastActivityAt = new Date().toISOString();
@@ -2538,11 +2565,13 @@ function appendRoomSystemRow(room, text) {
  * switching rooms restores history exactly as rendered; the live node is
  * appended only when the caller knows the room is on screen.
  */
-function buildRoomMessageRow(senderName, messageText, sentAtRaw, isOwnMessage, attachmentData, room) {
+function buildRoomMessageRow(senderName, messageText, sentAtRaw, isOwnMessage, attachmentData, room, messageData = {}) {
   const row = document.createElement("article");
   row.className = "message-row private-message-row";
+  if (messageData.id) row.dataset.messageId = String(messageData.id);
   row.dataset.own = isOwnMessage ? "true" : "false";
   if (isOwnMessage) row.classList.add("is-own-message");
+  if (messageData.id) row.addEventListener("contextmenu", (event) => openPrivateMessageContextMenu(event, messageData, room));
 
   const avatar = document.createElement("div");
   avatar.className = "message-avatar";
@@ -2577,7 +2606,16 @@ function buildRoomMessageRow(senderName, messageText, sentAtRaw, isOwnMessage, a
     bubble.appendChild(messageEl);
   }
 
-  if (attachmentData) {
+  if (messageData.edited) {
+    const editedEl = document.createElement("span"); editedEl.className = "message-edited-tag";
+    editedEl.textContent = "Edited"; nameRow.appendChild(editedEl);
+  }
+  if (messageData.deleted) {
+    const deletedEl = document.createElement("div"); deletedEl.className = "message-text message-deleted-text";
+    deletedEl.textContent = "Message deleted for everyone"; bubble.appendChild(deletedEl);
+  }
+
+  if (attachmentData && !messageData.deleted) {
     bubble.appendChild(buildAttachmentElement(attachmentData, room));
   }
 
@@ -2590,11 +2628,64 @@ function buildRoomMessageRow(senderName, messageText, sentAtRaw, isOwnMessage, a
     : sentDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
   bubble.appendChild(metaEl);
-  row.append(avatar, bubble);
+  const contentStack = document.createElement("div"); contentStack.className = "message-content-stack";
+  contentStack.appendChild(bubble); renderReactionSummary(contentStack, messageData, (item, emoji) => togglePrivateReaction(room, item, emoji));
+  row.append(avatar, contentStack);
   return row;
 }
 
-function cacheRoomRow(room, senderName, messageText, sentAtRaw, isOwnMessage, attachmentData) {
+async function sendPrivateAction(room, messageData, action) {
+  if (!room?.key || !room.channel || !messageData?.id) return;
+  const ct = await encryptPrivatePayload(room.key, {
+    c: clientId, t: new Date().toISOString(), a: { type: action.type, id: messageData.id, ...action }
+  });
+  room.channel.send({ type: "broadcast", event: PRIVATE_MESSAGE_EVENT, payload: { v: 1, id: `${clientId}-${Date.now()}-action`, s: room.saltB64, ct }}).catch(() => {});
+}
+
+function refreshPrivateMessage(room, messageData) {
+  if (activeRoomCode !== room.code) return;
+  const old = privateMessageList.querySelector(`[data-message-id="${CSS.escape(String(messageData.id))}"]`);
+  if (old) old.replaceWith(buildRoomMessageRow(messageData.name, messageData.message, messageData.sentAt, messageData.clientId === clientId, messageData.attachmentData, room, messageData));
+}
+
+function togglePrivateReaction(room, data, emoji) {
+  const reactions = data.reactions || (data.reactions = {}); const entry = reactions[emoji] || { count: 0, users: [] };
+  const users = Array.isArray(entry.users) ? entry.users : []; const index = users.indexOf(clientId); const remove = index >= 0;
+  if (remove) users.splice(index, 1); else users.push(clientId);
+  entry.users = users; entry.count = users.length; reactions[emoji] = entry; refreshPrivateMessage(room, data);
+  sendPrivateAction(room, data, { emoji, remove }).catch(() => {});
+}
+
+function applyPrivateMessageAction(room, frameId, plain) {
+  const action = plain.a; const data = room.messageRecords.get(action.id); if (!data) return;
+  if (!action.id || !action.type) return;
+  if (action.type === "edit" && plain.c === data.clientId) { data.message = cleanMessage(action.message || ""); data.edited = true; }
+  else if (action.type === "delete" && plain.c === data.clientId) { data.deleted = true; data.message = ""; data.attachmentData = null; }
+  else if (action.type === "reaction") {
+    const reactions = data.reactions || (data.reactions = {}); const entry = reactions[action.emoji] || { count: 0, users: [] }; const users = entry.users || [];
+    const index = users.indexOf(plain.c); if (action.remove && index >= 0) users.splice(index, 1); else if (!action.remove && index < 0) users.push(plain.c);
+    entry.users = users; entry.count = users.length; reactions[action.emoji] = entry;
+  } else return;
+  room.listRows = room.listRows.map((row) => row.id === data.id ? { ...row, messageText: data.message, attachmentData: data.attachmentData, reactions: data.reactions, edited: data.edited, deleted: data.deleted } : row);
+  room.transcript = (room.transcript || []).map((row) => row.id === data.id ? { ...row, m: data.message, f: data.attachmentData, reactions: data.reactions, edited: data.edited, deleted: data.deleted } : row);
+  refreshPrivateMessage(room, data); scheduleSessionSave();
+}
+
+function openPrivateMessageContextMenu(event, data, room) {
+  event.preventDefault(); closeMessageContextMenu();
+  const menu = document.createElement("div"); menu.className = "message-context-menu";
+  const add = (label, handler, danger = false) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; if (danger) button.classList.add("is-danger"); button.onclick = () => { closeMessageContextMenu(); handler(); }; menu.appendChild(button); };
+  if (data.clientId === clientId && !data.deleted) {
+    add("Edit message", () => { editingPrivateMessage = { room, data }; privateMessageInput.value = data.message || ""; privateMessageInput.focus(); autoResizePrivateTextarea(); });
+    add("Delete for everyone", () => { sendPrivateAction(room, data, { type: "delete" }).catch(() => {}); applyPrivateMessageAction(room, data.id, { c: clientId, a: { type: "delete", id: data.id } }); }, true);
+  }
+  add("Delete for yourself", () => { room.listRows = room.listRows.filter((row) => row.id !== data.id); room.transcript = (room.transcript || []).filter((row) => row.id !== data.id); document.querySelector(`[data-message-id="${CSS.escape(String(data.id))}"]`)?.remove(); scheduleSessionSave(); }, true);
+  const shell = document.createElement("div"); shell.className = "message-actions-popover"; const quick = createQuickReactionPicker(data, event.clientX, event.clientY, (item, emoji) => togglePrivateReaction(room, item, emoji)); shell.append(quick, menu); document.body.appendChild(shell); messageContextMenu = shell;
+  const top = Math.max(58, Math.min(event.clientY, innerHeight - menu.offsetHeight - 8)); shell.style.left = `${Math.max(8, Math.min(event.clientX, innerWidth - quick.offsetWidth - 8))}px`; shell.style.top = `${top}px`;
+  quick.style.top = `-48px`;
+}
+
+function cacheRoomRow(room, senderName, messageText, sentAtRaw, isOwnMessage, attachmentData, messageData = {}) {
   // Data, not a built-and-cloned DOM node — see the note in
   // appendRoomSystemRow for why cloneNode() isn't safe here (it would
   // silently drop the attachment menu's click handlers).
@@ -2605,14 +2696,15 @@ function cacheRoomRow(room, senderName, messageText, sentAtRaw, isOwnMessage, at
     sentAtRaw,
     isOwnMessage,
     attachmentData
+    , id: messageData.id, reactions: messageData.reactions || {}, edited: Boolean(messageData.edited), deleted: Boolean(messageData.deleted)
   });
   if (room.listRows.length > 200) room.listRows.shift();
 }
 
-function appendRoomMessageRow(room, senderName, messageText, sentAtRaw, isOwnMessage, attachmentData) {
+function appendRoomMessageRow(room, senderName, messageText, sentAtRaw, isOwnMessage, attachmentData, messageData = {}) {
   privateEmptyState.classList.add("hidden");
 
-  const row = buildRoomMessageRow(senderName, messageText, sentAtRaw, isOwnMessage, attachmentData, room);
+  const row = buildRoomMessageRow(senderName, messageText, sentAtRaw, isOwnMessage, attachmentData, room, messageData);
 
   const wasNearBottom = isNearBottom(privateMessageList);
   privateMessageList.appendChild(row);
@@ -2624,6 +2716,7 @@ function appendRoomMessageRow(room, senderName, messageText, sentAtRaw, isOwnMes
     sentAtRaw,
     isOwnMessage,
     attachmentData
+    , id: messageData.id, reactions: messageData.reactions || {}, edited: Boolean(messageData.edited), deleted: Boolean(messageData.deleted)
   });
   if (room.listRows.length > 200) room.listRows.shift();
 
